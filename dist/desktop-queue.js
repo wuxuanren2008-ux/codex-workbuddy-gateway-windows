@@ -12,7 +12,15 @@ const TERMINAL = new Set(["needs_review", "blocked", "failed", "cancelled"]);
 /** Prove the helper was launched by the native desktop app, not a standalone CLI or Codex. */
 export function assertDesktopCaller(config) {
     if (process.platform === "win32") {
-        const desktopPid = nativeAncestor(windowsProcesses(), process.ppid, config.cliElectronPath);
+        if (!fs.existsSync(config.cliElectronPath))
+            throw new Error("The real WorkBuddy desktop executable was not found; configure WORKBUDDY_CLI_ELECTRON before claiming or reporting tasks.");
+        let desktopPid;
+        try {
+            desktopPid = nativeAncestor(windowsProcesses(), process.ppid, config.cliElectronPath);
+        }
+        catch (error) {
+            throw new Error(`Could not verify the real WorkBuddy desktop caller; no claim or report was accepted. ${error instanceof Error ? error.message : String(error)}`);
+        }
         if (desktopPid)
             return { desktopPid };
         throw new Error("This worker helper must be called from the real WorkBuddy desktop conversation. Standalone CLI and Codex-side execution cannot report WorkBuddy results.");
