@@ -4,6 +4,8 @@ This Windows adaptation retains the upstream macOS route. Windows uses native Wo
 
 ## Commands
 
+Clone this fork and run `npm ci` and `npm run build` first. Copy `.env.example` to `.env` only if `.env` does not already exist. Keep `WORKBUDDY_BACKEND=desktop-queue`; existing configuration and task state must be preserved. The old upstream ZIP downloads do not include this Windows adapter.
+
 From the project directory in PowerShell:
 
 ```powershell
@@ -14,6 +16,16 @@ node scripts/launch.mjs service status
 ```
 
 `scripts/launch.mjs` loads this project's `.env` and preserves literal arguments. In a host's stdio MCP registration, use the absolute Node executable as `command` and the absolute launcher path followed by `hub-mcp` (Agent Hub) or `gateway` (direct WorkBuddy) as `args`.
+
+For Codex CLI in PowerShell, replace the project path with the actual checkout:
+
+```powershell
+$nodeBin = (Get-Command node).Source
+codex mcp add agent-hub-windows -- $nodeBin 'C:\path\to\gateway\scripts\launch.mjs' hub-mcp
+codex mcp add workbuddy-windows -- $nodeBin 'C:\path\to\gateway\scripts\launch.mjs' gateway
+```
+
+Install the Skill from the complete project with `npm run skill:install`. It becomes available in the next Codex conversation. New tasks should use `workbuddy-executor` and specify the actual business workspace.
 
 WorkBuddy executable and history paths can be overridden using `WORKBUDDY_CLI_ELECTRON` and `WORKBUDDY_CONFIG_DIR`. Local configuration and task state must not be published. Node must be >=22.13.0.
 

@@ -9,3 +9,5 @@ This repository is a Windows adaptation of:
 The upstream source, commit attribution and documentation are retained. Windows-specific additions are described in `docs/WINDOWS.md` and `docs/WINDOWS-VALIDATION.md`.
 
 The upstream repository did not provide a LICENSE at the time of this adaptation. This fork does not grant a new license over upstream code. Its public visibility should not be interpreted as an unrestricted redistribution, modification or commercial-use grant. A complete project-wide open-source license requires permission from the relevant rights holders.
+
+Newly authored Windows-specific files are separately licensed under MIT, with their exact scope listed in `LICENSE-WINDOWS-ADDITIONS.md`. This does not change the upstream code's licensing status.
