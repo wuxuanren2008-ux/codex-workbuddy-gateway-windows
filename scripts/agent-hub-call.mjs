@@ -10,7 +10,7 @@ if (!name || !name.startsWith("agent_hub_")) throw new Error("Usage: node script
 const parameters = JSON.parse(argument.startsWith("@") ? fs.readFileSync(argument.slice(1), "utf8") : argument);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const client = new Client({ name: "agent-hub-local-client", version: "0.7.0" });
-const transport = new StdioClientTransport({ command: path.join(root, "bin/agent-hub-mcp"), cwd: root,
+const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(root, "scripts/launch.mjs"), "hub-mcp"], cwd: root,
   env: Object.fromEntries(Object.entries(process.env).filter(entry => typeof entry[1] === "string")), stderr: "inherit" });
 try {
   await client.connect(transport);

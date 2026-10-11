@@ -10,6 +10,7 @@ import { readDesktopSession } from "./desktop-runtime.js";
 import { runsDirectory, writePrivateJson } from "./run-journal.js";
 import { pumpWorkspaceWorkers, recoverExpiredAttempt, readServiceRegistration, registeredServiceConfig, serviceRegistrationPath, validateServiceRegistration, type NativeDesktopTrigger, type ServiceRegistration } from "./persistent-service.js";
 import { WorkspaceWorkers, readWorkspaceWorkers } from "./workspace-workers.js";
+import { installWindowsTask, uninstallWindowsTask, windowsTaskName, windowsTaskStatus } from "./windows-service.js";
 
 const DEBUG_ENV = "WORKBUDDY_REMOTE_DEBUGGING_PORT";
 interface CommandResult { status: number; stdout: string; stderr?: string }
@@ -56,6 +57,7 @@ export interface InstallServiceOptions {
 }
 
 export function installService(options: InstallServiceOptions, run: LaunchctlRunner = launchctl): { ok: true; registration: ServiceRegistration; configFile: string; restartWorkBuddyRequired: boolean } {
+  if ((options.platform ?? process.platform) === "win32") return installWindowsService(options);
   if ((options.platform ?? process.platform) !== "darwin") throw new Error("Persistent desktop service installation requires macOS launchd");
   const projectDir = fs.realpathSync(options.projectDir);
   // Keep the native session's path spelling (macOS /var may alias /private/var).
@@ -115,6 +117,25 @@ export function installService(options: InstallServiceOptions, run: LaunchctlRun
   return { ok: true, registration, configFile, restartWorkBuddyRequired: !currentEnv.present || currentEnv.value !== String(registration.cdpPort) };
 }
 
+function installWindowsService(options: InstallServiceOptions): { ok: true; registration: ServiceRegistration; configFile: string; restartWorkBuddyRequired: boolean } {
+  const projectDir = fs.realpathSync(options.projectDir);
+  const workspace = path.resolve(options.workspace);
+  const nodeBin = fs.realpathSync(options.nodeBin ?? process.execPath);
+  if (!fs.statSync(workspace).isDirectory() || !fs.statSync(nodeBin).isFile() || !fs.existsSync(path.join(projectDir, "dist", "service-cli.js"))) throw new Error("Build the gateway and provide an existing workspace and Node executable");
+  const evidence = readDesktopSession(options.config.workbuddyConfigDir, options.sessionId);
+  if (!evidence.registered || !evidence.cwd || path.resolve(evidence.cwd).toLowerCase() !== workspace.toLowerCase()) throw new Error("The selected native desktop session is not registered for this workspace");
+  const configFile = serviceRegistrationPath(projectDir);
+  const previous = readServiceRegistration(configFile);
+  const registration: ServiceRegistration = { version: 1, sessionId: options.sessionId, workspace, projectDir, nodeBin,
+    cdpPort: options.cdpPort, dbFile: options.config.dbFile, runsDir: runsDirectory(options.config), workbuddyConfigDir: options.config.workbuddyConfigDir,
+    cliElectronPath: options.config.cliElectronPath, intervalMs: options.intervalMs ?? 1500, installedAt: new Date().toISOString(), windowsTaskName: windowsTaskName(projectDir, "worker") };
+  validateServiceRegistration(registration);
+  writePrivateJson(configFile, registration);
+  try { installWindowsTask({ name: registration.windowsTaskName!, root: projectDir, nodeBin, entry: "service", args: ["run", "--config", configFile], logs: path.join(projectDir, "data", "service-logs") }); }
+  catch(error) { if(previous)writePrivateJson(configFile,previous); else fs.rmSync(configFile,{force:true}); throw error; }
+  return { ok: true, registration, configFile, restartWorkBuddyRequired: false };
+}
+
 export function serviceStatus(configFile: string, run: LaunchctlRunner = launchctl, uid = process.getuid?.()): Record<string, unknown> {
   const registration = readServiceRegistration(configFile);
   if (!registration) return { ok: true, installed: false, configFile };
@@ -124,12 +145,19 @@ export function serviceStatus(configFile: string, run: LaunchctlRunner = launchc
   try { state = JSON.parse(fs.readFileSync(stateFile, "utf8")); } catch { state = undefined; }
   const status = registration.launchdLabel && uid !== undefined ? run(["print", `gui/${uid}/${registration.launchdLabel}`]) : undefined;
   const workers=readWorkspaceWorkers(registeredServiceConfig(loadConfig(),registration),registration).map(worker=>({...worker,desktopRegistered:readDesktopSession(registration.workbuddyConfigDir,worker.sessionId).registered}));
-  return { ok: true, installed: Boolean(registration.launchdLabel && registration.plistPath && fs.existsSync(registration.plistPath)), launchdLoaded: status?.status === 0, configFile, sessionId: registration.sessionId, workspace: registration.workspace, cdpPort: registration.cdpPort, desktopRegistered: workers.some(worker=>worker.state==='ready'&&worker.desktopRegistered), defaultDesktopRegistered:native.registered, workers, state };
+  const windows = registration.windowsTaskName ? windowsTaskStatus(registration.windowsTaskName) : undefined;
+  return { ok: true, installed: windows?.installed ?? Boolean(registration.launchdLabel && registration.plistPath && fs.existsSync(registration.plistPath)), serviceRunning: windows?.running ?? status?.status === 0, launchdLoaded: status?.status === 0, configFile, sessionId: registration.sessionId, workspace: registration.workspace, cdpPort: registration.cdpPort, desktopRegistered: workers.some(worker=>worker.state==='ready'&&worker.desktopRegistered), defaultDesktopRegistered:native.registered, workers, state };
 }
 
 export function uninstallService(configFile: string, run: LaunchctlRunner = launchctl, uid = process.getuid?.()): Record<string, unknown> {
   const registration = readServiceRegistration(configFile);
   if (!registration) return { ok: true, installed: false, configFile };
+  if (registration.windowsTaskName) {
+    uninstallWindowsTask(registration.windowsTaskName, { root: registration.projectDir, nodeBin: registration.nodeBin, entry: "service", pidFile: path.join(registration.projectDir, "data", "persistent-service-status.json") });
+    fs.rmSync(configFile, { force: true });
+    fs.rmSync(path.join(registration.projectDir, "data", "persistent-service-status.json"), { force: true });
+    return { ok: true, installed: false, taskHistoryPreserved: true, configFile };
+  }
   if (registration.launchdLabel && uid !== undefined) {
     const target = `gui/${uid}/${registration.launchdLabel}`;
     const result = run(["bootout", target]);
@@ -152,7 +180,7 @@ async function runService(configFile: string): Promise<void> {
   const registration = readServiceRegistration(configFile);
   if (!registration) throw new Error("Persistent service registration is missing; run install first");
   const config = registeredServiceConfig(loadConfig(), registration);
-  checked(launchctl, ["setenv", DEBUG_ENV, String(registration.cdpPort)]);
+  if (process.platform !== "win32") checked(launchctl, ["setenv", DEBUG_ENV, String(registration.cdpPort)]);
   // Dynamic factory keeps the service testable without importing native/CDP machinery.
   const module = await import(new URL("./native-desktop-trigger.js", import.meta.url).href) as { createNativeDesktopTrigger?: (config: Config, options: { cdpPort: number }) => NativeDesktopTrigger | Promise<NativeDesktopTrigger> };
   if (typeof module.createNativeDesktopTrigger !== "function") throw new Error("The native desktop trigger factory is unavailable; rebuild the complete project");

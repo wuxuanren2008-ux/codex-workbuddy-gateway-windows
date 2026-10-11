@@ -1,5 +1,9 @@
 # Agent Hub：本机 Agent 执行工作台
 
+本仓库是 [dudu555-djiao/codex-workbuddy-gateway](https://github.com/dudu555-djiao/codex-workbuddy-gateway) v0.7.0 的 Windows 适配 fork，原作者和原实现归属保持不变。新增 Node 启动器、PowerShell 进程与端口核对，以及当前用户计划任务服务。已在 Windows + WorkBuddy 5.7.6 验证真实创建文件、同会话修改和服务重启后的再次派工。用法见 [Windows 说明](docs/WINDOWS.md)，验证范围见 [验证记录](docs/WINDOWS-VALIDATION.md)。下文保留上游 macOS 说明，Windows 请优先使用上述文档。
+
+上游未提供开源许可证；本 fork 不替上游代码授予新的许可证。公开可见不等于可以任意再分发或用于商业项目，请先确认相关授权。
+
 当前版本 **v0.7.0**。目标是让不同项目、程序和 Agent 通过统一接口使用已有执行器。首期接入 **WorkBuddy**；DeepSeek Harness 原桥接保留，尚未加入聚合接口；qodex 后续单独确认接入。
 
 已提供本机工作台、HTTP API、JavaScript 客户端、CLI 和统一 MCP。项目会话自动准备；任务、执行事件和返工记录持久保存；执行完成与内容验收分开。积分余额与消耗尚未接入，明确返回未知。

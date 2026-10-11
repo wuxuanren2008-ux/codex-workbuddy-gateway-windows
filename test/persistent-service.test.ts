@@ -148,7 +148,7 @@ test("wake intent is durable before native submission, and daemon restart never 
   assert.equal(f.trigger.wakes[0]!.sessionId, "worker-session");
   assert.equal(f.store.get("transport-fixture")?.runtimeSource, undefined);
   assert.equal(journal.events(0, Infinity).filter((event) => event.type === "result").length, 0);
-  assert.equal(fs.statSync(path.join(journal.dir, "wake.json")).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(fs.statSync(path.join(journal.dir, "wake.json")).mode & 0o777, 0o600);
 });
 
 test("installed binding supplies the worker identity without a new listener or explicit session", async (t) => {
@@ -335,8 +335,10 @@ test("launchd installer preserves the original environment through reinstall and
   const registration = readServiceRegistration(installed.configFile)!;
   assert.deepEqual(registration.launchctlEnvPrevious, { present: true, value: "original-value" });
   assert.equal(fake.value(), "9333");
-  assert.equal(fs.statSync(installed.configFile).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(registration.plistPath!).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(installed.configFile).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(registration.plistPath!).mode & 0o777, 0o600);
+  }
   const plist = fs.readFileSync(registration.plistPath!, "utf8");
   assert.match(plist, /<key>RunAtLoad<\/key><true\/>/);
   assert.match(plist, /<key>KeepAlive<\/key><true\/>/);

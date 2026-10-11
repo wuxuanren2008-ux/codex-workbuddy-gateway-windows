@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { classifyWindowsPort, windowsPortOwners, windowsProcesses, nativeRoot } from "./windows-platform.js";
 import { DatabaseSync } from "node:sqlite";
 import type { Config } from "./config.js";
 import type { NativeDesktopTrigger } from "./persistent-service.js";
@@ -98,7 +100,7 @@ export interface NativeDesktopProcessControl {
 const DEFAULT_PROCESS_CONTROL: NativeDesktopProcessControl = {
   run: (file,args,timeoutMs) => execFileSync(file,args,{encoding:"utf8",timeout:timeoutMs}),
   launch(executable,cdpPort) {
-    const child=spawn(executable,[],{detached:true,stdio:"ignore",env:{...process.env,WORKBUDDY_REMOTE_DEBUGGING_PORT:String(cdpPort)}});
+    const child=spawn(executable,process.platform === "win32" ? [`--remote-debugging-port=${cdpPort}`, "--remote-debugging-address=127.0.0.1"] : [],{detached:true,stdio:"ignore",windowsHide:true,env:{...process.env,WORKBUDDY_REMOTE_DEBUGGING_PORT:String(cdpPort)}});
     child.on("error",()=>undefined);child.unref();
   },
   pause: milliseconds => new Promise(resolve=>setTimeout(resolve,milliseconds)),
@@ -110,6 +112,7 @@ function noProcessMatch(error: unknown): boolean {
 }
 
 export class NativeDesktopRpcTrigger implements NativeDesktopTrigger {
+  private get windows(): boolean { return process.platform === "win32" && this.processControl === DEFAULT_PROCESS_CONTROL; }
   private socket?: WebSocket;
   private sequence = 0;
   private pending = new Map<number, {resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>}>();
@@ -119,6 +122,10 @@ export class NativeDesktopRpcTrigger implements NativeDesktopTrigger {
   }
 
   private portState(): "absent" | "native" | "foreign" | "unavailable" {
+    if (this.windows) {
+      try { return classifyWindowsPort(windowsPortOwners(this.cdpPort), this.config.cliElectronPath); }
+      catch { return "unavailable"; }
+    }
     let output:string;
     try {
       output = this.processControl.run("/usr/sbin/lsof", ["-nP", `-iTCP:${this.cdpPort}`, "-sTCP:LISTEN", "-Fp"], 3000);
@@ -135,12 +142,14 @@ export class NativeDesktopRpcTrigger implements NativeDesktopTrigger {
   }
 
   private nativePids(): number[] {
+    if (this.windows) return windowsProcesses().filter(item => nativeRoot(item, this.config.cliElectronPath)).map(item => item.ProcessId);
     const executable=path.resolve(this.config.cliElectronPath);
     const output = this.processControl.run("/bin/ps", ["-axo", "pid=,command="], 3000);
     return output.split("\n").flatMap(line => {const match=line.trim().match(/^(\d+)\s+(.+)$/);const command=match?.[2]??"";return match && (command===executable||command.startsWith(executable+" --"))&&!/--type=|--stdio|cli\/bin|sidecar-entry|daemon-app-server/.test(command) ? [Number(match[1])] : [];});
   }
 
   private rootPidExists(pid:number): boolean {
+    if (this.windows) { try { process.kill(pid, 0); return true; } catch { return false; } }
     try {return this.processControl.run("/bin/ps",["-p",String(pid),"-o","pid="],3000).trim()===String(pid);}
     catch(error){if(noProcessMatch(error))return false;throw error;}
   }
@@ -164,6 +173,7 @@ export class NativeDesktopRpcTrigger implements NativeDesktopTrigger {
       if (!this.autoLaunch) throw new Error("Native desktop is offline");
       const running=this.nativePids();
       if (running.length) {
+        if (this.windows) throw new Error("WorkBuddy is running without the gateway loopback port. Quit it once from its tray menu after saving your work; the gateway will reopen it with the port enabled. No process was terminated.");
         if(running.length!==1||!this.canEnablePortWithoutInterruptingWork())throw new Error("Waiting for native WorkBuddy tasks to finish before enabling its persistent local port");
         const rootPid=running[0]!;
         const current=this.nativePids();
@@ -178,13 +188,15 @@ export class NativeDesktopRpcTrigger implements NativeDesktopTrigger {
       if(this.portState()!=="absent")throw new Error("Registered local port changed during setup; no replacement was launched");
       if (!fs.statSync(this.config.cliElectronPath).isFile()) throw new Error("WorkBuddy desktop executable is missing");
       this.processControl.launch(this.config.cliElectronPath,this.cdpPort);
-      for (let retry=0;retry<60&&!this.ownerIsNative();retry++) await this.processControl.pause(250);
+      const launchDeadline = Date.now() + 15000;
+      for (let retry=0;retry<60 && (!this.windows || Date.now()<launchDeadline) && !this.ownerIsNative();retry++) await this.processControl.pause(250);
       if (!this.ownerIsNative()) throw new Error("Native WorkBuddy local RPC port did not become available");
     }
     const response = await fetch(`http://127.0.0.1:${this.cdpPort}/json/list`, {signal:AbortSignal.timeout(4000)});
     const targets = await response.json() as Array<{type?:string;url?:string;webSocketDebuggerUrl?:string}>;
-    const executableRoot = path.resolve(this.config.cliElectronPath,"../../Resources/app.asar");
-    const target = targets.find(item => item.type === "page" && item.url?.startsWith(`file://${executableRoot}/`) && !item.url.includes("splash") && item.webSocketDebuggerUrl);
+    const executableRoot = this.windows ? path.join(path.dirname(this.config.cliElectronPath), "resources", "app.asar") : path.resolve(this.config.cliElectronPath,"../../Resources/app.asar");
+    const prefix = this.windows ? pathToFileURL(executableRoot).href.toLowerCase() + "/" : `file://${executableRoot}/`;
+    const target = targets.find(item => item.type === "page" && (this.windows ? item.url?.toLowerCase() : item.url)?.startsWith(prefix) && !item.url?.includes("splash") && item.webSocketDebuggerUrl);
     if (!target?.webSocketDebuggerUrl) throw new Error("WorkBuddy main renderer is not ready");
     const url = new URL(target.webSocketDebuggerUrl);
     if (!['127.0.0.1','localhost'].includes(url.hostname) || Number(url.port) !== this.cdpPort || url.protocol !== 'ws:') throw new Error("Native debugger target is not the registered loopback endpoint");

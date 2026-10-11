@@ -1,5 +1,11 @@
 # 首次连接、多项目接入或临时监听恢复
 
+## Windows 本地适配版
+
+如完整项目包含 `scripts/launch.mjs` 与 `docs/WINDOWS.md`，可使用本地 Windows 适配。默认应用为用户目录的 `WorkBuddyAI/WorkBuddyAI.exe`，原生历史目录为 `.workbuddy-ai`；通过 `.env` 的 `WORKBUDDY_CLI_ELECTRON` 和 `WORKBUDDY_CONFIG_DIR` 覆盖。使用 Node >=22.13.0，MCP 入口为 `node 完整项目/scripts/launch.mjs gateway`。诊断和服务状态使用 `doctor`、`service status` 子命令。
+
+Windows 不使用 macOS LaunchAgent。下面 macOS 的 shell、launchctl 与应用路径步骤只适用于 macOS；Windows 按 `docs/WINDOWS.md` 使用当前用户计划任务和 Node 启动器。保持独立业务目录、会话身份及真实成果核对要求。
+
 这里是旧 workbuddy MCP 的兼容连接流程。v0.7.0 新任务的 Agent Hub 入口先读 [统一接入](agent-hub.md)；已有直连任务继续按本页恢复。仅在 MCP 缺失、首次安装或连接异常时读取，日常任务使用 SKILL.md 的精简派工流程。
 
 ## 项目未配置

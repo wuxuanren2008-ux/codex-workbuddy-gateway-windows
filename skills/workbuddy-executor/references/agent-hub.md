@@ -1,5 +1,11 @@
 # Agent Hub v0.7.0
 
+## Windows 本地适配版
+
+Windows 使用完整项目的 `scripts/launch.mjs`，不直接执行 `bin/` 下的 shell 文件。用 Node 的绝对路径执行 `node scripts/launch.mjs hub status`；安装服务为 `node scripts/launch.mjs hub install`。MCP command 是 Node 的绝对路径，args 为 `["完整项目/scripts/launch.mjs", "hub-mcp"]`。当前项目文档 `docs/WINDOWS.md` 说明本地适配和限制。
+
+服务采用当前用户的 Windows 计划任务。首次连接若 WorkBuddy 未启用网关端口，需保存工作后从托盘正常退出一次，网关会带回环端口重开；关闭窗口可能只隐藏应用。不要强行结束用户的任务，也不盲目重放未知派工。Windows 任务照常通过 Agent Hub 和真实桌面 claim/report 完成，不使用 UI 代写成果。
+
 用于新任务、跨项目调用和统一结果获取。已有直连 WorkBuddy 任务继续使用原 taskId 和旧 MCP；不要转成新 Hub 任务重跑。
 
 ## 连接

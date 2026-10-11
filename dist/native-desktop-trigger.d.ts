@@ -11,6 +11,7 @@ export declare class NativeDesktopRpcTrigger implements NativeDesktopTrigger {
     readonly cdpPort: number;
     private readonly autoLaunch;
     private readonly processControl;
+    private get windows();
     private socket?;
     private sequence;
     private pending;

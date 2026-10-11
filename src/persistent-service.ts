@@ -32,6 +32,7 @@ export interface ServiceRegistration {
   launchdLabel?: string;
   plistPath?: string;
   launchctlEnvPrevious?: { present: boolean; value?: string };
+  windowsTaskName?: string;
 }
 
 export interface WakeIntent {
@@ -93,10 +94,14 @@ function writeWakeIntent(file: string, intent: WakeIntent): void {
   writePrivateJson(file, intent);
   // Force the intent and renamed directory entry to stable storage before native
   // submission. A machine restart must not erase our evidence of possible delivery.
-  const fd = fs.openSync(file, "r");
+  const fd = fs.openSync(file, process.platform === "win32" ? "r+" : "r");
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  const directory = fs.openSync(path.dirname(file), "r");
-  try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+  // Windows does not allow opening directory handles through node:fs. The file
+  // is flushed above; atomic rename still provides the queue publication boundary.
+  if (process.platform !== "win32") {
+    const directory = fs.openSync(path.dirname(file), "r");
+    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+  }
 }
 
 /** SQLite CAS avoids two recovering daemons reclaiming the same stale file lock. */

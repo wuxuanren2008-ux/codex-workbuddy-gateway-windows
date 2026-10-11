@@ -11,7 +11,7 @@ const parameters = JSON.parse(argument.startsWith("@") ? fs.readFileSync(argumen
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const client = new Client({ name: "workbuddy-local-client", version: "0.6.0" });
 // The launcher loads this installation's .env, preserving its queue and Node configuration.
-const transport = new StdioClientTransport({ command: path.join(root,"bin/workbuddy-gateway"), cwd: root,
+const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(root,"scripts/launch.mjs"), "gateway"], cwd: root,
   env: Object.fromEntries(Object.entries(process.env).filter(entry=>typeof entry[1]==="string")),stderr:"inherit" });
 try {
   await client.connect(transport);

@@ -23,8 +23,9 @@ function fixture(t: {after(fn:()=>void):void}) {
   const registry=new WorkspaceWorkers(config);
   const calls:Array<{id:string;workspace:string}>=[];
   const creator:NativeWorkerCreator={async createWorker(workspace,sessionId){calls.push({id:sessionId,workspace});register(sessionId,workspace);return{sessionId,workspace};}};
-  t.after(()=>{registry.close();native.close();fs.rmSync(dir,{recursive:true,force:true});});
-  return{dir,a,b,config,native,register,registry,calls,creator};
+  const cleanups:Array<()=>void>=[];
+  t.after(()=>{for(const close of cleanups)close();registry.close();native.close();fs.rmSync(dir,{recursive:true,force:true});});
+  return{dir,a,b,config,native,register,registry,calls,creator,cleanup:(close:()=>void)=>cleanups.push(close)};
 }
 
 test('independent projects create separate native sessions; reuse survives registry reconnect',async t=>{
@@ -89,7 +90,7 @@ test('one service wakes two project queues while preserving the legacy default a
   const a=await f.registry.ensure({workspace:f.a,sessionId:'legacy'},f.creator),b=await f.registry.ensure({workspace:f.b},f.creator);
   const registration:ServiceRegistration={version:1,sessionId:'legacy',workspace:f.a,projectDir:f.dir,nodeBin:process.execPath,cdpPort:18491,dbFile:f.config.dbFile,runsDir:f.config.runsDir!,workbuddyConfigDir:f.dir,cliElectronPath:f.config.cliElectronPath};
   writePrivateJson(f.config.serviceConfigFile!,registration);
-  const store=new TaskStore(f.config.dbFile);t.after(()=>store.close());
+  const store=new TaskStore(f.config.dbFile);f.cleanup(()=>store.close());
   const resolver=async (_:Config,input:{workspace:string;sessionId?:string;title?:string})=>{const result=await f.registry.ensure(input,f.creator);return{ok:true,...result,workspace:result.worker.workspace,sessionId:result.worker.sessionId,next:''};};
   const coordinator=new TaskCoordinator(f.config,store,new WorkBuddyClient(f.config),resolver);
   await coordinator.send({taskId:'task-a',objective:'project A',workspace:f.a});
@@ -110,7 +111,7 @@ test('one service wakes two project queues while preserving the legacy default a
 });
 
 test('duplicate task IDs return before workspace creation and remote model rejection causes no creation',async t=>{
-  const f=fixture(t),store=new TaskStore(f.config.dbFile);t.after(()=>store.close());let resolved=0;
+  const f=fixture(t),store=new TaskStore(f.config.dbFile);f.cleanup(()=>store.close());let resolved=0;
   const coordinator=new TaskCoordinator(f.config,store,new WorkBuddyClient(f.config),async()=>{resolved++;throw Error('must not create');});
   store.createOrGet({taskId:'already',messageId:'existing',objective:'old',state:'queued'});
   const duplicate=await coordinator.send({taskId:'already',objective:'new',workspace:f.b});assert.equal(duplicate.created,false);

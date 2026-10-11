@@ -9,19 +9,20 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
-    "hub": "./bin/agent-hub serve",
-    "hub:mcp": "./bin/agent-hub-mcp",
+    "start": "node scripts/launch.mjs gateway",
+    "hub": "node scripts/launch.mjs hub serve",
+    "hub:mcp": "node scripts/launch.mjs hub-mcp",
     "auth": "node dist/auth.js",
     "dev": "tsx src/server.ts",
     "test": "tsx --test test/**/*.test.ts",
-    "doctor": "node dist/doctor.js",
+    "doctor": "node scripts/launch.mjs doctor",
     "package": "node scripts/package.mjs",
     "skill:install": "node scripts/install-skill.mjs",
     "deepseek:start": "node dist/deepseek-server.js",
     "deepseek:skill:install": "node scripts/install-deepseek-skill.mjs",
     "deepseek:plugin:install": "node scripts/install-deepseek-plugin.mjs",
-    "deepseek:plugin:test": "node --test deepseek-plugin/test/*.test.mjs"
+    "deepseek:plugin:test": "node --test deepseek-plugin/test/*.test.mjs",
+    "test:windows": "tsx --test test/windows-platform.test.ts test/windows-launcher.test.ts test/native-desktop-trigger.test.ts test/desktop-queue.test.ts test/persistent-service.test.ts test/workspace-workers.test.ts test/platform.test.ts test/coordinator.test.ts test/task-store.test.ts test/brief-result.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.21.0",

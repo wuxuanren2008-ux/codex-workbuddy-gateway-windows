@@ -163,8 +163,10 @@ test("protects Codex terminal decisions and atomically checks acceptance state",
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workbuddy-terminal-"));
   const store = new TaskStore(path.join(dir, "private-data", "tasks.sqlite"));
   t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  assert.equal(fs.statSync(path.dirname(store.file)).mode & 0o777, 0o700);
-  assert.equal(fs.statSync(store.file).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(path.dirname(store.file)).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(store.file).mode & 0o777, 0o600);
+  }
   store.createOrGet({ taskId: "terminal", messageId: "pending", objective: "verify", state: "queued", acceptanceCommands: ["original check"] });
   store.beginAttempt("terminal", { attemptId: "first", messageId: "first-run" });
   assert.equal(store.updateAttempt("terminal", "first", { state: "accepted" }, { expectedStates: ["needs_review", "completed"] }).applied, false);

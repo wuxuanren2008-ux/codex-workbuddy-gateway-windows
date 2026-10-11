@@ -1,4 +1,6 @@
 import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
 
 function optional(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -57,7 +59,7 @@ export function loadConfig(): Config {
     oauthPort: integer("WORKBUDDY_OAUTH_PORT", 8787),
     oauthScopes: optional("WORKBUDDY_OAUTH_SCOPES") ?? "user.localassistant.invokable user.localassistant.readable",
     requestTimeoutMs: integer("WORKBUDDY_REQUEST_TIMEOUT_MS", 30_000),
-    cliElectronPath: optional("WORKBUDDY_CLI_ELECTRON") ?? "/Applications/WorkBuddy.app/Contents/MacOS/Electron",
+    cliElectronPath: optional("WORKBUDDY_CLI_ELECTRON") ?? (process.platform === "win32" ? [path.join(os.homedir(), "WorkBuddyAI", "WorkBuddyAI.exe"), path.join(process.env.LOCALAPPDATA ?? os.homedir(), "Programs", "WorkBuddyAI", "WorkBuddyAI.exe")].find(file => fs.existsSync(file)) ?? path.join(os.homedir(), "WorkBuddyAI", "WorkBuddyAI.exe") : "/Applications/WorkBuddy.app/Contents/MacOS/Electron"),
     cliScriptPath: optional("WORKBUDDY_CLI_SCRIPT") ?? "/Applications/WorkBuddy.app/Contents/Resources/app.asar/cli/bin/codebuddy",
     cliPermissionMode: optional("WORKBUDDY_CLI_PERMISSION_MODE") ?? "acceptEdits",
     // Allow one explicit WorkBuddy action by default so delegated coding
@@ -66,7 +68,7 @@ export function loadConfig(): Config {
     acpPermissionMode: optional("WORKBUDDY_ACP_PERMISSION_MODE") === "deny" ? "deny" : "allow_once",
     gatewayUrl: (optional("WORKBUDDY_GATEWAY_URL") ?? "http://127.0.0.1:64523").replace(/\/$/, ""),
     gatewayPassword: optional("WORKBUDDY_GATEWAY_PASSWORD"),
-    workbuddyConfigDir: optional("WORKBUDDY_CONFIG_DIR") ?? path.join(process.env.HOME ?? "", ".workbuddy"),
+    workbuddyConfigDir: optional("WORKBUDDY_CONFIG_DIR") ?? path.join(os.homedir(), process.platform === "win32" ? ".workbuddy-ai" : ".workbuddy"),
     runsDir: optional("WORKBUDDY_RUNS_DIR") ? path.resolve(optional("WORKBUDDY_RUNS_DIR")!) : undefined,
     taskTimeoutSeconds: Math.min(integer("WORKBUDDY_TASK_TIMEOUT_SECONDS", 1800), 86_400),
     serviceConfigFile: path.resolve(optional("WORKBUDDY_SERVICE_CONFIG") ?? "./data/persistent-service.json"),

@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { nativeAncestor, windowsProcesses, psQuote } from "./windows-platform.js";
 import { readDesktopSession } from "./desktop-runtime.js";
 import { DurableRuns, RunJournal, runsDirectory, writePrivateJson } from "./run-journal.js";
 import { TaskStore } from "./task-store.js";
@@ -10,6 +11,12 @@ const SOURCE = "desktop_queue";
 const TERMINAL = new Set(["needs_review", "blocked", "failed", "cancelled"]);
 /** Prove the helper was launched by the native desktop app, not a standalone CLI or Codex. */
 export function assertDesktopCaller(config) {
+    if (process.platform === "win32") {
+        const desktopPid = nativeAncestor(windowsProcesses(), process.ppid, config.cliElectronPath);
+        if (desktopPid)
+            return { desktopPid };
+        throw new Error("This worker helper must be called from the real WorkBuddy desktop conversation. Standalone CLI and Codex-side execution cannot report WorkBuddy results.");
+    }
     let pid = process.ppid;
     const executable = path.resolve(config.cliElectronPath);
     for (let step = 0; pid > 1 && step < 30; step++) {
@@ -85,16 +92,19 @@ export class DesktopQueue {
         const evidence = readDesktopSession(this.config.workbuddyConfigDir, sessionId);
         if (!evidence.registered)
             throw new Error(evidence.reason ?? "Desktop session unregistered");
-        const helper = fileURLToPath(new URL("../bin/workbuddy-worker", import.meta.url));
-        const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+        const windows = process.platform === "win32";
+        const helper = windows ? fileURLToPath(new URL("../scripts/launch.mjs", import.meta.url)) : fileURLToPath(new URL("../bin/workbuddy-worker", import.meta.url));
+        const quote = windows ? psQuote : (value) => `'${value.replaceAll("'", "'\\''")}'`;
+        const workerCommand = windows ? `& ${quote(process.execPath)} ${quote(helper)} worker` : quote(helper);
         if (persistent) {
             if (!evidence.cwd || !path.isAbsolute(evidence.cwd))
                 throw new Error("Persistent setup needs the native session's absolute workspace");
             const service = fileURLToPath(new URL("../bin/workbuddy-service", import.meta.url));
-            return { sessionId, workspace: evidence.cwd, started: false, mode: "persistent", prompt: `请一次性配置本桌面会话为 Codex 的常驻执行会话。会话 ID：${sessionId}。用户授权安装本机服务，并在需要启用原生接口时、其他任务结束后自动重启 WorkBuddy 一次。\n请用你自己的 Bash 工具执行：\n${quote(service)} install --session-id ${quote(sessionId)} --workspace ${quote(evidence.cwd)} --cdp-port 18491\n安装完成只回报安装状态或真实错误，结束当前回复。不要启动无限 claim，不改桥接器源码，不写其他成果或记忆，不改变权限设置。服务会保存会话绑定、按真实队列自动唤起本会话，退出和重开后无需再次粘贴。安装成功不等于任务通过；后续仍需实际领取、产物和验收证明。需要登录或原生权限时如实说明。` };
+            const serviceCommand = windows ? `& ${quote(process.execPath)} ${quote(helper)} service` : quote(service);
+            return { sessionId, workspace: evidence.cwd, started: false, mode: "persistent", prompt: `请一次性配置本桌面会话为 Codex 的常驻执行会话。会话 ID：${sessionId}。用户授权安装本机服务，并在需要启用原生接口时、其他任务结束后自动重启 WorkBuddy 一次。\n请用你自己的 ${windows ? "PowerShell" : "Bash"} 工具执行：\n${serviceCommand} install --session-id ${quote(sessionId)} --workspace ${quote(evidence.cwd)} --cdp-port 18491\n安装完成只回报安装状态或真实错误，结束当前回复。不要启动无限 claim，不改桥接器源码，不写其他成果或记忆，不改变权限设置。服务会保存会话绑定、按真实队列自动唤起本会话，退出和重开后无需再次粘贴。安装成功不等于任务通过；后续仍需实际领取、产物和验收证明。需要登录或原生权限时如实说明。` };
         }
         const waiting = wakeOnce ? "关键：本次由常驻服务按任务唤起。完成 report 后只再运行一次 claim --wait-seconds 0；若有任务则实际执行并报告，若 status=retry 则结束本轮。不要循环空等；新任务和后续返工由常驻服务自动重新唤起，无需用户粘贴。" : "关键：回报之后不要结束当前轮次，立即再次运行 claim，等待 Codex 的检查和返工任务；下一任务必须按新的 attemptId 和 leaseToken 执行。status=retry 表示暂时没有任务，最多连续重试 4 次（每次最多 50 秒）；领取任务后重置空等计数。连续四次空等后结束并明确说明监听已停止，需要重新启动。长命令若转后台，等待该命令输出后再决定下一步，不要并行启动多个 claim。";
-        return { sessionId, workspace: evidence.cwd, started: false, prompt: `请将本桌面会话用作 Codex 任务队列的执行会话。会话 ID：${sessionId}。这是启动监听，具体工作只按领取到的任务执行。\n使用你自己的 Bash 工具执行下面的本机命令（不能由 Codex 代执行）：\n${quote(helper)} claim --session-id ${quote(sessionId)} --wait-seconds 50\n若返回 status=task，读取完整 prompt，遵守目标、约束和验收要求，用 WorkBuddy 本会话自己的工具实际执行。保留返回的 attemptId、sessionId、leaseToken，不要猜测或复用旧轮次。完成后通过同一个 helper 的 report 命令回报：--session-id、--attempt-id、--lease-token 必须使用本轮值；--status 使用 completed、blocked 或 failed；--text 写实际结果（包括 TASK_STATUS、FILES_CHANGED、COMMANDS_RUN、TEST_RESULT、REMAINING_PROBLEMS）；--artifacts 使用真实绝对路径组成的 JSON 数组。命令参数用安全的 shell 引号。空报告、只有计划或没有实际产物不能报 completed。可用 progress 命令（相同身份参数和 --text）上报进度并检查 cancellationRequested；取消时停止当前任务并如实 report。\n${waiting}\n不要为了领取任务而修改本桥接器实现、WorkBuddy 数据库或安全设置；不要提取账号凭据。遇到权限或输入请求遵守 WorkBuddy 桌面现有设置，需要人操作则明确说明。helper 只传递任务和回报，不替你制作成果。` };
+        return { sessionId, workspace: evidence.cwd, started: false, prompt: `请将本桌面会话用作 Codex 任务队列的执行会话。会话 ID：${sessionId}。这是启动监听，具体工作只按领取到的任务执行。\n使用你自己的 ${windows ? "PowerShell" : "Bash"} 工具执行下面的本机命令（不能由 Codex 代执行）：\n${workerCommand} claim --session-id ${quote(sessionId)} --wait-seconds 50\n若返回 status=task，读取完整 prompt，遵守目标、约束和验收要求，用 WorkBuddy 本会话自己的工具实际执行。保留返回的 attemptId、sessionId、leaseToken，不要猜测或复用旧轮次。完成后通过同一个 helper 的 report 命令回报（Windows 使用同一 PowerShell 启动命令加 report 子命令）：--session-id、--attempt-id、--lease-token 必须使用本轮值；--status 使用 completed、blocked 或 failed；--text 写实际结果（包括 TASK_STATUS、FILES_CHANGED、COMMANDS_RUN、TEST_RESULT、REMAINING_PROBLEMS）；--artifacts 使用真实绝对路径组成的 JSON 数组。命令参数用安全的 shell 引号。空报告、只有计划或没有实际产物不能报 completed。可用 progress 命令（相同身份参数和 --text）上报进度并检查 cancellationRequested；取消时停止当前任务并如实 report。\n${waiting}\n不要为了领取任务而修改本桥接器实现、WorkBuddy 数据库或安全设置；不要提取账号凭据。遇到权限或输入请求遵守 WorkBuddy 桌面现有设置，需要人操作则明确说明。helper 只传递任务和回报，不替你制作成果。` };
     }
     listeners() {
         if (!fs.existsSync(this.listenersDir))

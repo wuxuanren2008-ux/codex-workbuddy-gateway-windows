@@ -32,6 +32,7 @@ export interface ServiceRegistration {
         present: boolean;
         value?: string;
     };
+    windowsTaskName?: string;
 }
 export interface WakeIntent {
     version: 1;

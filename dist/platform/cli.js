@@ -10,6 +10,7 @@ import { HubEngine } from "./engine.js";
 import { WorkBuddyProvider } from "./workbuddy.js";
 import { createHubServer } from "./http.js";
 import { AgentHubClient } from "./client.js";
+import { installWindowsTask, uninstallWindowsTask, windowsTaskName } from "../windows-service.js";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const directory = path.resolve(process.env.AGENT_HUB_STATE_DIR ?? path.join(root, "data", "platform"));
 const command = process.argv[2] ?? "serve";
@@ -102,6 +103,26 @@ async function main() {
     if (command === "serve")
         return serve();
     if (command === "install" || command === "uninstall") {
+        if (process.platform === "win32") {
+            const name = windowsTaskName(root, "hub");
+            if (command === "uninstall") {
+                uninstallWindowsTask(name, { root, nodeBin: process.execPath, entry: "hub", pidFile: path.join(directory, "connection.json") });
+                process.stdout.write("Agent Hub service removed; task records preserved.\n");
+                return;
+            }
+            installWindowsTask({ name, root, nodeBin: process.execPath, entry: "hub", args: ["serve"], logs: directory });
+            const until = Date.now() + 15000;
+            while (Date.now() < until) {
+                try {
+                    await AgentHubClient.local(directory).request("/v1/health", "GET", undefined, AbortSignal.timeout(1000));
+                    process.stdout.write("Agent Hub Windows service ready\n");
+                    return;
+                }
+                catch { }
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            throw new Error(`Windows service installed but not ready; inspect ${path.join(directory, "stderr.log")}`);
+        }
         if (process.platform !== "darwin" || process.getuid?.() === undefined || !process.env.HOME)
             throw new Error("Service installation currently requires macOS");
         const plist = path.join(process.env.HOME, "Library", "LaunchAgents", `${label}.plist`);

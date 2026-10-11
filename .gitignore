@@ -16,3 +16,9 @@ logs/
 *.zip
 *.sha256
 .DS_Store
+.local-tools/
+windows-*.log
+windows-smoke-result.json
+WINDOWS-TEST-REPORT.md
+WINDOWS-ADAPTATION-REPORT.md
+docs/superpowers/

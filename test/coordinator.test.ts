@@ -43,14 +43,15 @@ class FakeClient extends WorkBuddyClient {
   }
 }
 
-function fixture(t: { after: (fn: () => void) => void }): { dir: string; config: Config; store: TaskStore; client: FakeClient; coordinator: TaskCoordinator } {
+function fixture(t: { after: (fn: () => void) => void }): { dir: string; config: Config; store: TaskStore; client: FakeClient; coordinator: TaskCoordinator; cleanup: (close: () => void) => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workbuddy-coordinator-"));
   const config: Config = { ...loadConfig(), backend: "desktop-acp", dbFile: path.join(dir, "tasks.sqlite"), runsDir: path.join(dir, "runs"), tokenFile: path.join(dir, "unused-credentials.json"), workbuddyConfigDir: path.join(dir, "fake-workbuddy") };
   const store = new TaskStore(config.dbFile);
   const client = new FakeClient(config);
   const coordinator = new TaskCoordinator(config, store, client);
-  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  return { dir, config, store, client, coordinator };
+  const cleanups: Array<() => void> = [];
+  t.after(() => { for (const close of cleanups) close(); store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  return { dir, config, store, client, coordinator, cleanup: close => cleanups.push(close) };
 }
 
 function event(task: StoredTask, seq: number, text: string, metadata: Record<string, unknown> = {}): LocalMessage {
@@ -206,13 +207,13 @@ test("blocks a failed dispatch and rejects acceptance from unverified hidden bac
 });
 
 test("an acceptance decision cannot overwrite a rework reserved by another MCP process", async (t) => {
-  const { dir, config, store, client, coordinator } = fixture(t);
+  const { dir, config, store, client, coordinator, cleanup } = fixture(t);
   await send(coordinator, dir);
   const originalAttempt = store.get("video")!;
   finish(client, originalAttempt);
   await coordinator.sync("video");
   const otherProcessStore = new TaskStore(config.dbFile);
-  t.after(() => otherProcessStore.close());
+  cleanup(() => otherProcessStore.close());
   const reservedId = RunJournal.newId();
   const updateAttempt = store.updateAttempt.bind(store);
   store.updateAttempt = (taskId, attemptId, patch, options) => {
